@@ -127,12 +127,32 @@
     <section class="history-section" id="history-section">
       <div class="section-header section-header-toggle" id="history-toggle">
         <div class="section-header-left">
-          <h2 class="section-title">History</h2>
-          <span class="history-count" id="history-count">0 URLs</span>
+          <h2 class="section-title">Database</h2>
         </div>
         <span class="history-chevron" id="history-chevron">▾</span>
       </div>
       <div id="history-body" class="hidden">
+        <div class="history-search-bar">
+          <div class="history-search-wrap">
+            <span class="history-search-icon">⌕</span>
+            <input type="text" id="history-search-input" class="history-search-input"
+              placeholder="Search domains, URLs, categories…" spellcheck="false" autocomplete="off" />
+            <button type="button" id="history-search-clear" class="history-search-clear hidden">✕</button>
+          </div>
+          <div class="history-filter-row">
+            <div class="filter-group">
+              <button class="filter-btn active" data-filter-type="all">All</button>
+              <button class="filter-btn" data-filter-type="content">Content</button>
+              <button class="filter-btn" data-filter-type="product">Product</button>
+            </div>
+            <div class="filter-group">
+              <button class="filter-btn active" data-filter-conf="0">Any</button>
+              <button class="filter-btn" data-filter-conf="75">75%+</button>
+              <button class="filter-btn" data-filter-conf="90">90%+</button>
+            </div>
+            <span class="history-search-status" id="history-search-status"></span>
+          </div>
+        </div>
         <div id="history-empty" class="history-empty">
           No URLs analyzed yet. Enter a URL above to get started.
         </div>
@@ -155,12 +175,71 @@
       </div>
     </section>
 
+    <!-- Targeting -->
+    <section class="targeting-section" id="targeting-section">
+      <div class="section-header section-header-toggle" id="targeting-toggle">
+        <div class="section-header-left">
+          <h2 class="section-title">Targeting</h2>
+          <span class="targeting-beta">Beta</span>
+        </div>
+        <span class="history-chevron" id="targeting-chevron">▾</span>
+      </div>
+      <div id="targeting-body" class="hidden">
+        <div class="targeting-form-card">
+          <p class="targeting-hint">Describe a target audience or content type to find matching domains and pages from the database.</p>
+          <form id="targeting-form" autocomplete="off">
+            <textarea id="targeting-input" class="targeting-textarea"
+              placeholder="e.g. people interested in world cup soccer, photography enthusiasts, home renovation DIYers…"
+              rows="3" spellcheck="false"></textarea>
+            <div class="targeting-actions">
+              <button type="submit" class="search-btn" id="targeting-submit-btn">
+                <span class="btn-label" id="targeting-btn-label">Find Matches</span>
+                <span class="btn-spinner hidden" id="targeting-btn-spinner">
+                  <svg class="spinner-svg" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+                            stroke-dasharray="31.4" stroke-dashoffset="10" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+          </form>
+          <div id="targeting-error" class="error-msg hidden"></div>
+        </div>
+        <div id="targeting-results" class="hidden">
+          <div class="targeting-results-meta">
+            <p id="targeting-rationale" class="targeting-rationale"></p>
+            <div class="targeting-meta-row">
+              <div id="targeting-tags" class="targeting-tags"></div>
+              <div class="targeting-meta-right">
+                <span id="targeting-count" class="targeting-count"></span>
+                <button id="targeting-export-btn" class="targeting-export-btn hidden">↓ Export CSV</button>
+              </div>
+            </div>
+          </div>
+          <div class="history-table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Domain</th>
+                  <th>Title</th>
+                  <th>Category</th>
+                  <th>Type</th>
+                  <th>Match</th>
+                </tr>
+              </thead>
+              <tbody id="targeting-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <footer class="footer">
     Strata &nbsp;·&nbsp; IAB Content & Google Product Taxonomy &nbsp;·&nbsp; Results stored in SQLite
   </footer>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

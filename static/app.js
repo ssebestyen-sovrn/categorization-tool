@@ -33,13 +33,21 @@ const historyBody    = document.getElementById('history-body');
 const historyEmpty   = document.getElementById('history-empty');
 const historyWrap    = document.getElementById('history-table-wrap');
 const historyTbody   = document.getElementById('history-tbody');
-const historyCount   = document.getElementById('history-count');
 
-let currentMode   = 'single';
-let historyOpen   = false;
-let sortCol       = 'confidence';
-let sortDir       = 'desc';
-let historyItems  = [];
+
+const historySearchInput  = document.getElementById('history-search-input');
+const historySearchClear  = document.getElementById('history-search-clear');
+const historySearchStatus = document.getElementById('history-search-status');
+
+let currentMode        = 'single';
+let historyOpen        = false;
+let sortCol            = 'confidence';
+let sortDir            = 'desc';
+let historyItems       = [];
+let historyTypeFilter  = 'all';
+let historyConfFilter  = 0;
+let historySearchQuery = '';
+let searchDebounce     = null;
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -122,7 +130,6 @@ function buildResultCardHTML(data) {
   let bodyHtml = '';
 
   if (isProduct) {
-    // Google Product Taxonomy path
     const conf = typeof data.confidence === 'number' ? data.confidence : 0;
     const cls  = confClass(conf);
     const categoryHtml = google_category
@@ -156,7 +163,6 @@ function buildResultCardHTML(data) {
         <div class="tags-wrap">${tagsHtml(keywords, 'tag-keyword')}</div>
       </div>`;
   } else {
-    // IAB content path
     const catRows = categories.map(cat => {
       const cls   = confClass(cat.confidence);
       const width = pct(cat.confidence);
@@ -247,18 +253,76 @@ historyToggle.addEventListener('click', () => {
   historyBody.classList.toggle('hidden', !historyOpen);
 });
 
+// ── History search & filters ──────────────────────────────────────
+
+historySearchInput.addEventListener('input', () => {
+  historySearchQuery = historySearchInput.value.trim();
+  historySearchClear.classList.toggle('hidden', !historySearchQuery);
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(searchHistory, 350);
+});
+
+historySearchClear.addEventListener('click', () => {
+  historySearchInput.value = '';
+  historySearchQuery = '';
+  historySearchClear.classList.add('hidden');
+  searchHistory();
+});
+
+document.querySelectorAll('.filter-btn[data-filter-type]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn[data-filter-type]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    historyTypeFilter = btn.dataset.filterType;
+    searchHistory();
+  });
+});
+
+document.querySelectorAll('.filter-btn[data-filter-conf]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn[data-filter-conf]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    historyConfFilter = parseInt(btn.dataset.filterConf, 10);
+    renderHistoryRows();
+  });
+});
+
+async function searchHistory() {
+  const q    = historySearchQuery;
+  const type = historyTypeFilter === 'all' ? '' : historyTypeFilter;
+
+  try {
+    let items;
+    if (!q && !type) {
+      const res = await fetch('/api/history');
+      items = res.ok ? await res.json() : [];
+      historySearchStatus.textContent = items.length ? `${items.length} most recent` : '';
+    } else {
+      const params = new URLSearchParams();
+      if (q)    params.set('q', q);
+      if (type) params.set('page_type', type);
+      const res = await fetch(`/api/search?${params}`);
+      items = res.ok ? await res.json() : [];
+      historySearchStatus.textContent = `${items.length} result${items.length !== 1 ? 's' : ''}`;
+    }
+    renderHistory(items);
+  } catch { /* silent */ }
+}
+
 // ── Sort helpers ──────────────────────────────────────────────────
 
 function sortValue(item, col) {
+  const isProd = item.page_type === 'product';
   switch (col) {
     case 'url':        return item.url.toLowerCase();
     case 'domain':     return item.domain.toLowerCase();
-    case 'category': {
-      const c = item.categories?.[0];
-      return c ? (c.tier2_name || c.tier1_name || '').toLowerCase() : '';
-    }
-    case 'confidence': return item.categories?.[0]?.confidence ?? -1;
-    case 'sentiment':  return item.sentiment?.score ?? 0;
+    case 'category':
+      return isProd
+        ? (item.google_category || '').toLowerCase()
+        : ((item.categories?.[0]?.tier2_name || item.categories?.[0]?.tier1_name) || '').toLowerCase();
+    case 'confidence':
+      return isProd ? (item.confidence ?? -1) : (item.categories?.[0]?.confidence ?? -1);
+    case 'sentiment':  return isProd ? -2 : (item.sentiment?.score ?? 0);
     case 'flagged':    return item.flagged ? 1 : 0;
     case 'date':       return item.created_at || '';
     default:           return '';
@@ -294,20 +358,8 @@ function updateSortHeaders() {
 
 function renderHistory(items) {
   historyItems = items;
-  const count = items.length;
-  historyCount.textContent = count === 1 ? '1 URL' : `${count} URLs`;
 
-  if (count === 0) {
-    historyEmpty.classList.remove('hidden');
-    historyWrap.classList.add('hidden');
-    return;
-  }
-  historyEmpty.classList.add('hidden');
-  historyWrap.classList.remove('hidden');
-
-  renderHistoryRows();
-
-  // Column sort click handlers (attach once)
+  // Attach sort handlers (replace onclick to avoid stacking)
   document.querySelectorAll('.history-table th[data-col]').forEach(th => {
     th.onclick = () => {
       const col = th.dataset.col;
@@ -323,23 +375,57 @@ function renderHistory(items) {
   });
 
   updateSortHeaders();
+  renderHistoryRows();
 }
 
 function renderHistoryRows() {
-  const sorted = sortedItems(historyItems);
-  historyTbody.innerHTML = sorted.map(item => {
-    const topCat  = item.categories?.[0];
-    const catLabel = topCat ? (topCat.tier2_name || topCat.tier1_name) : '—';
-    const confVal  = topCat ? pct(topCat.confidence) : '—';
-    const confCls  = topCat ? confClass(topCat.confidence) : '';
-    const sent     = (item.sentiment?.label || 'neutral').toLowerCase();
+  let items = sortedItems(historyItems);
+
+  // Client-side confidence filter
+  if (historyConfFilter > 0) {
+    items = items.filter(item => {
+      const conf = item.page_type === 'product'
+        ? item.confidence
+        : item.categories?.[0]?.confidence;
+      return conf != null && Math.round(conf * 100) >= historyConfFilter;
+    });
+  }
+
+  const count = items.length;
+
+  if (count === 0) {
+    const isFiltered = historySearchQuery || historyTypeFilter !== 'all' || historyConfFilter > 0;
+    historyEmpty.textContent = isFiltered
+      ? 'No results match your filters.'
+      : 'No URLs analyzed yet. Enter a URL above to get started.';
+    historyEmpty.classList.remove('hidden');
+    historyWrap.classList.add('hidden');
+    return;
+  }
+
+  historyEmpty.classList.add('hidden');
+  historyWrap.classList.remove('hidden');
+
+  historyTbody.innerHTML = items.map(item => {
+    const isProd   = item.page_type === 'product';
+    const catLabel = isProd
+      ? (item.google_category ? truncate(item.google_category, 32) : '—')
+      : (item.categories?.[0] ? truncate(item.categories[0].tier2_name || item.categories[0].tier1_name, 32) : '—');
+    const conf    = isProd ? item.confidence : item.categories?.[0]?.confidence;
+    const confVal = conf != null ? pct(conf) : '—';
+    const confCls = conf != null ? confClass(conf) : '';
+    const sent    = isProd ? '' : (item.sentiment?.label || 'neutral').toLowerCase();
+    const pill    = isProd
+      ? '<span class="type-pill type-pill-product">P</span>'
+      : '<span class="type-pill type-pill-content">C</span>';
+
     return `
       <tr data-url="${escHtml(item.url)}">
         <td class="cell-url" title="${escHtml(item.url)}">${escHtml(truncate(item.url, 55))}</td>
-        <td class="cell-domain">${escHtml(item.domain)}</td>
-        <td class="cell-category">${escHtml(truncate(catLabel, 32))}</td>
+        <td class="cell-domain">${pill} ${escHtml(item.domain)}</td>
+        <td class="cell-category">${escHtml(catLabel)}</td>
         <td class="cell-conf ${confCls}">${confVal}</td>
-        <td><span class="sent-dot ${sent}"></span>${escHtml(sent)}</td>
+        <td>${sent ? `<span class="sent-dot ${sent}"></span>${escHtml(sent)}` : '—'}</td>
         <td class="flag-icon">${item.flagged ? '⚠️' : ''}</td>
         <td class="cell-date">${formatDate(item.created_at)}</td>
       </tr>`;
@@ -358,10 +444,7 @@ function renderHistoryRows() {
 }
 
 async function loadHistory() {
-  try {
-    const res = await fetch('/api/history');
-    if (res.ok) renderHistory(await res.json());
-  } catch { /* silent */ }
+  await searchHistory();
 }
 
 // ── Error helpers ─────────────────────────────────────────────────
@@ -397,8 +480,7 @@ singleForm.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) { showError(data.detail || `Error ${res.status}`); return; }
     renderResults(data);
-    const h = await fetch('/api/history');
-    if (h.ok) renderHistory(await h.json());
+    await searchHistory();
   } catch { showError('Network error — is the server running?'); }
   finally  { setSingleLoading(false); }
 });
@@ -516,7 +598,6 @@ bulkForm.addEventListener('submit', async (e) => {
     updateProgress(done, urls.length);
   }
 
-  // Run with concurrency limit
   const queue = urls.map((url, i) => () => fetchOne(url, i));
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     while (queue.length) await queue.shift()();
@@ -525,7 +606,6 @@ bulkForm.addEventListener('submit', async (e) => {
 
   updateProgress(urls.length, urls.length);
 
-  // Render bulk results
   const succeeded = results.filter(r => r.status === 'success');
   const failed    = results.filter(r => r.status === 'error');
   const cached    = succeeded.filter(r => r.cached);
@@ -544,10 +624,166 @@ bulkForm.addEventListener('submit', async (e) => {
   setBulkLoading(false);
   bulkInput.disabled = false;
 
-  // Refresh history
-  const h = await fetch('/api/history');
-  if (h.ok) renderHistory(await h.json());
+  await searchHistory();
 });
+
+// ── Targeting ─────────────────────────────────────────────────────
+
+const targetingToggle    = document.getElementById('targeting-toggle');
+const targetingBody      = document.getElementById('targeting-body');
+const targetingForm      = document.getElementById('targeting-form');
+const targetingInput     = document.getElementById('targeting-input');
+const targetingSubmitBtn = document.getElementById('targeting-submit-btn');
+const targetingBtnLabel  = document.getElementById('targeting-btn-label');
+const targetingBtnSpinner= document.getElementById('targeting-btn-spinner');
+const targetingError     = document.getElementById('targeting-error');
+const targetingResults   = document.getElementById('targeting-results');
+const targetingRationale = document.getElementById('targeting-rationale');
+const targetingTags      = document.getElementById('targeting-tags');
+const targetingCount     = document.getElementById('targeting-count');
+const targetingTbody     = document.getElementById('targeting-tbody');
+const targetingExportBtn = document.getElementById('targeting-export-btn');
+
+let targetingOpen = false;
+
+targetingToggle.addEventListener('click', () => {
+  targetingOpen = !targetingOpen;
+  document.getElementById('targeting-section').classList.toggle('open', targetingOpen);
+  targetingBody.classList.toggle('hidden', !targetingOpen);
+});
+
+targetingForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const description = targetingInput.value.trim();
+  if (!description) return;
+
+  targetingError.classList.add('hidden');
+  targetingResults.classList.add('hidden');
+  targetingSubmitBtn.disabled = true;
+  targetingBtnLabel.textContent = 'Finding matches…';
+  targetingBtnSpinner.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/targeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      targetingError.textContent = data.detail || 'Error finding matches';
+      targetingError.classList.remove('hidden');
+      return;
+    }
+    renderTargetingResults(data);
+  } catch {
+    targetingError.textContent = 'Network error — is the server running?';
+    targetingError.classList.remove('hidden');
+  } finally {
+    targetingSubmitBtn.disabled = false;
+    targetingBtnLabel.textContent = 'Find Matches';
+    targetingBtnSpinner.classList.add('hidden');
+  }
+});
+
+function renderTargetingResults(data) {
+  const { rationale, iab_names = [], match_keywords = [], google_keywords = [], results = [], total } = data;
+
+  targetingRationale.textContent = rationale;
+
+  const iabTags  = iab_names.map(name =>
+    `<span class="targeting-tag targeting-tag-iab">${escHtml(name)}</span>`).join('');
+  const kwTags   = match_keywords.map(k =>
+    `<span class="targeting-tag targeting-tag-kw">${escHtml(k)}</span>`).join('');
+  const googTags = google_keywords.map(k =>
+    `<span class="targeting-tag targeting-tag-google">${escHtml(k)}</span>`).join('');
+  targetingTags.innerHTML = iabTags + kwTags + googTags;
+
+  targetingCount.textContent = total === 0
+    ? 'No matches found'
+    : `${total} match${total !== 1 ? 'es' : ''}`;
+
+  if (total === 0) {
+    targetingTbody.innerHTML = `
+      <tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:32px">
+        No matching domains found. Try a broader description.
+      </td></tr>`;
+  } else {
+    targetingTbody.innerHTML = results.map(item => {
+      const isProd   = item.page_type === 'product';
+      const catLabel = isProd
+        ? (item.google_category || '—')
+        : (item.categories?.[0]
+            ? (item.categories[0].tier2_name || item.categories[0].tier1_name)
+            : '—');
+      const conf    = item.match_confidence ?? (isProd ? item.confidence : item.categories?.[0]?.confidence);
+      const confVal = conf != null ? pct(conf) : '—';
+      const confCls = conf != null ? confClass(conf) : '';
+      const pill    = isProd
+        ? '<span class="type-pill type-pill-product">Product</span>'
+        : '<span class="type-pill type-pill-content">Content</span>';
+
+      return `
+        <tr data-url="${escHtml(item.url)}" class="targeting-result-row">
+          <td class="cell-domain">${escHtml(item.domain)}</td>
+          <td class="cell-url" title="${escHtml(item.url)}">${escHtml(truncate(item.title || item.url, 55))}</td>
+          <td class="cell-category">${escHtml(truncate(catLabel, 36))}</td>
+          <td>${pill}</td>
+          <td><span class="confidence-pct ${confCls}">${confVal}</span></td>
+        </tr>`;
+    }).join('');
+
+    // Click row → show full result card
+    targetingTbody.querySelectorAll('tr.targeting-result-row').forEach(row => {
+      row.style.cursor = 'pointer';
+      row.addEventListener('click', () => {
+        const item = results.find(i => i.url === row.dataset.url);
+        if (item) {
+          urlInput.value = item.url;
+          setMode('single');
+          renderResults({ ...item, cached: true });
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    });
+  }
+
+  targetingResults.classList.remove('hidden');
+
+  if (total > 0) {
+    targetingExportBtn.classList.remove('hidden');
+    targetingExportBtn.onclick = () => exportTargetingCSV(results, targetingInput.value.trim());
+  } else {
+    targetingExportBtn.classList.add('hidden');
+  }
+}
+
+function exportTargetingCSV(results, description) {
+  const headers = ['domain', 'url', 'title', 'page_type', 'category', 'match_confidence'];
+
+  const rows = results.map(item => {
+    const isProd = item.page_type === 'product';
+    const category = isProd
+      ? (item.google_category || '')
+      : (item.categories?.[0]
+          ? [item.categories[0].tier1_name, item.categories[0].tier2_name].filter(Boolean).join(' > ')
+          : '');
+    const conf = (item.match_confidence * 100).toFixed(1) + '%';
+
+    return [item.domain, item.url, item.title || '', item.page_type, category, conf]
+      .map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  });
+
+  const slug = description.slice(0, 40).replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+  const filename = `targeting_${slug}_${new Date().toISOString().slice(0,10)}.csv`;
+
+  const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 // ── Init ──────────────────────────────────────────────────────────
 loadHistory();

@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 load_dotenv(override=True)
 
-from database import init_db, get_categorization, save_categorization, get_all_categorizations
+from database import init_db, get_categorization, save_categorization, get_all_categorizations, search_categorizations, query_targeting
 from scraper import scrape_url
-from categorizer import categorize, categorize_content, MODEL_SONNET, MODEL_HAIKU
+from categorizer import categorize, categorize_content, MODEL_SONNET, MODEL_HAIKU, translate_targeting_query
 
 
 @asynccontextmanager
@@ -101,6 +101,52 @@ def api_categorize(req: CategorizeRequest):
 @app.get("/api/history")
 async def api_history():
     return get_all_categorizations()
+
+
+@app.get("/api/search")
+async def api_search(q: str = "", page_type: str = "", limit: int = 500):
+    return search_categorizations(q=q.strip(), page_type=page_type, limit=limit)
+
+
+class TargetingRequest(BaseModel):
+    description: str
+
+
+@app.post("/api/targeting")
+def api_targeting(req: TargetingRequest):
+    description = req.description.strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="Description is required")
+
+    try:
+        parsed = translate_targeting_query(description)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to interpret description: {exc}")
+
+    iab_ids         = parsed.get("iab_ids", [])
+    iab_names       = parsed.get("iab_names", iab_ids)
+    google_keywords = parsed.get("google_keywords", [])
+    match_keywords  = parsed.get("match_keywords", [])
+    rationale       = parsed.get("rationale", "")
+
+    if not iab_ids and not google_keywords:
+        raise HTTPException(status_code=422, detail="Could not extract targeting criteria from that description")
+
+    results = query_targeting(
+        iab_ids=iab_ids,
+        google_keywords=google_keywords,
+        match_keywords=match_keywords,
+    )
+
+    return {
+        "rationale": rationale,
+        "iab_ids": iab_ids,
+        "iab_names": iab_names,
+        "match_keywords": match_keywords,
+        "google_keywords": google_keywords,
+        "results": results,
+        "total": len(results),
+    }
 
 
 @app.get("/api/lookup")

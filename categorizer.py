@@ -211,3 +211,51 @@ def categorize(url: str, page_data: dict, model: str = MODEL_SONNET, force_type:
     if page_type == "product":
         return categorize_product(url, page_data, model=model)
     return categorize_content(url, page_data, model=model)
+
+
+_TARGETING_SYSTEM = """You translate audience or content targeting descriptions into precise database query parameters.
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "iab_ids": ["17-18", "17-20"],
+  "iab_names": ["Sports > Soccer", "Sports > Football"],
+  "match_keywords": ["soccer", "football", "FIFA", "World Cup", "Premier League"],
+  "google_keywords": ["soccer cleats", "soccer ball"],
+  "rationale": "one sentence explaining what was matched and why"
+}
+
+Rules:
+- iab_ids: PREFER tier-2 IDs (e.g. "17-18") over tier-1 (e.g. "17") — be specific, not broad
+  Include at most one tier-1 fallback if no tier-2 clearly applies. Max 5 IDs total.
+- iab_names: human-readable names matching iab_ids in the same order (e.g. "Sports > Soccer")
+- match_keywords: 4–10 specific terms that MUST appear in page titles, keywords, or category names
+  for a result to be truly relevant. These are used for precision filtering — make them specific.
+  e.g. for "world cup soccer": ["soccer", "football", "FIFA", "World Cup", "MLS", "Premier League"]
+  NOT broad terms like "sport" or "game" that would match unrelated content.
+- google_keywords: 2–4 phrases matching Google Product Taxonomy paths; [] if content-only
+- Always include a rationale"""
+
+
+def translate_targeting_query(description: str) -> dict:
+    taxonomy_context = get_taxonomy_context()
+    google_context   = get_google_taxonomy_context()
+
+    response = _client().messages.create(
+        model=MODEL_SONNET,
+        max_tokens=512,
+        system=[
+            {"type": "text", "text": _TARGETING_SYSTEM},
+            {
+                "type": "text",
+                "text": f"IAB Content Taxonomy (use these exact IDs):\n\n{taxonomy_context}\n\nGoogle Product Taxonomy:\n\n{google_context}",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        messages=[{"role": "user", "content": description}],
+    )
+
+    result = _parse_json(response.content[0].text)
+    # Normalise — older responses may not have match_keywords
+    if "match_keywords" not in result:
+        result["match_keywords"] = result.get("google_keywords", [])
+    return result
