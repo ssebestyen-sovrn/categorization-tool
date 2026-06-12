@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Strata</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=4" />
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="strata_logo.png" alt="Strata" style="height: 56px;" />
+      <p class="tagline">Categorize any URL using the IAB Content or Google Product Taxonomy</p>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- Input section -->
+    <section class="search-section">
+
+      <!-- Mode toggle -->
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btn-single" type="button">Single URL</button>
+        <button class="mode-btn" id="btn-bulk" type="button">Bulk <span class="bulk-max">up to 100</span></button>
+      </div>
+
+      <!-- Single mode -->
+      <form id="categorize-form" class="search-form" autocomplete="off">
+        <div class="search-input-wrap">
+          <span class="search-icon">🔗</span>
+          <input
+            id="url-input"
+            type="text"
+            placeholder="bing.com or https://example.com/article"
+            class="search-input"
+            required
+            spellcheck="false"
+          />
+          <button type="submit" class="search-btn" id="submit-btn">
+            <span class="btn-label">Analyze</span>
+            <span class="btn-spinner hidden" id="btn-spinner">
+              <svg class="spinner-svg" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+                        stroke-dasharray="31.4" stroke-dashoffset="10" />
+              </svg>
+            </span>
+          </button>
+        </div>
+        <div id="error-msg" class="error-msg hidden"></div>
+      </form>
+
+      <!-- Bulk mode -->
+      <form id="bulk-form" class="bulk-form hidden" autocomplete="off">
+        <div class="bulk-textarea-wrap">
+          <textarea
+            id="bulk-input"
+            class="bulk-textarea"
+            placeholder="One per line or comma-separated:&#10;bing.com, google.com, nytimes.com&#10;https://example.com/article"
+            rows="6"
+            spellcheck="false"
+          ></textarea>
+          <div class="bulk-meta">
+            <span class="bulk-counter" id="bulk-counter">0 / 100 URLs</span>
+            <span class="bulk-hint">One URL per line</span>
+          </div>
+        </div>
+        <div class="bulk-type-toggle">
+          <span class="bulk-type-label">Page type:</span>
+          <label class="bulk-type-option">
+            <input type="radio" name="bulk-type" value="auto" checked> Auto-detect
+          </label>
+          <label class="bulk-type-option">
+            <input type="radio" name="bulk-type" value="content"> Force Content
+          </label>
+          <label class="bulk-type-option">
+            <input type="radio" name="bulk-type" value="product"> Force Product
+          </label>
+        </div>
+        <div id="bulk-error-msg" class="error-msg hidden"></div>
+        <div class="bulk-actions">
+          <button type="submit" class="search-btn" id="bulk-submit-btn" disabled>
+            <span class="btn-label" id="bulk-btn-label">Analyze All</span>
+            <span class="btn-spinner hidden" id="bulk-btn-spinner">
+              <svg class="spinner-svg" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+                        stroke-dasharray="31.4" stroke-dashoffset="10" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </form>
+
+    </section>
+
+    <!-- Bulk progress -->
+    <section id="bulk-progress-section" class="hidden">
+      <div class="bulk-progress-card">
+        <div class="bulk-progress-header">
+          <span id="bulk-progress-label">Analyzing URL 1 of 3…</span>
+          <span id="bulk-progress-frac" class="bulk-progress-frac">0 / 0</span>
+        </div>
+        <div class="bulk-progress-track">
+          <div class="bulk-progress-fill" id="bulk-progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bulk results -->
+    <section id="bulk-results-section" class="hidden">
+      <div class="section-header">
+        <h2 class="section-title">Bulk Results</h2>
+        <div id="bulk-results-summary" class="bulk-results-summary"></div>
+      </div>
+      <div class="bulk-results-list" id="bulk-results-list"></div>
+    </section>
+
+    <!-- Single result -->
+    <section id="results-section" class="results-section hidden">
+      <div class="results-card" id="results-card"></div>
+    </section>
+
+    <!-- History -->
+    <section class="history-section" id="history-section">
+      <div class="section-header section-header-toggle" id="history-toggle">
+        <div class="section-header-left">
+          <h2 class="section-title">History</h2>
+          <span class="history-count" id="history-count">0 URLs</span>
+        </div>
+        <span class="history-chevron" id="history-chevron">▾</span>
+      </div>
+      <div id="history-body" class="hidden">
+        <div id="history-empty" class="history-empty">
+          No URLs analyzed yet. Enter a URL above to get started.
+        </div>
+        <div id="history-table-wrap" class="history-table-wrap hidden">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th data-col="url">URL <span class="sort-icon"></span></th>
+                <th data-col="domain">Domain <span class="sort-icon"></span></th>
+                <th data-col="category">Top Category <span class="sort-icon"></span></th>
+                <th data-col="confidence" class="sort-active sort-desc">Confidence <span class="sort-icon">▼</span></th>
+                <th data-col="sentiment">Sentiment <span class="sort-icon"></span></th>
+                <th data-col="flagged">Flagged <span class="sort-icon"></span></th>
+                <th data-col="date">Analyzed <span class="sort-icon"></span></th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    Strata &nbsp;·&nbsp; IAB Content & Google Product Taxonomy &nbsp;·&nbsp; Results stored in SQLite
+  </footer>
+
+  <script src="app.js?v=8"></script>
+</body>
+</html>
